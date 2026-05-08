@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+
+# Local artifacts
+.tmp_*
+*.wav
+*.mp3
+*.mov
+*.mp4
+data/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
