@@ -15,6 +15,12 @@ animate the AI Jonny avatar (custom Runway avatar created once via
 ``avatar_videos.create``. Output: per-segment talking-head MP4s plus
 a manifest JSON consumed by the AvatarOverlay player component.
 
+Stage 4 (Sunday): build-sfx — for each scene in the analyzer report,
+the multimodal Audio Director picks atmosphere + hard FX briefs and
+``sound_effect.create`` (eleven_text_to_sound_v2) renders each. The
+manifest the Hotel-v3 Resolve exporter consumes is per-scene with
+audio_assets keyed to A3 (atmosphere) and A4 (hard FX) tracks.
+
 Usage:
   python -m ai_editor.cli build-commentary --report <path> [--out <dir>]
                                             [--limit N] [--dry-run]
@@ -32,6 +38,11 @@ Usage:
                                               [--max-segments N]
                                               [--reference-image <path>]
                                               [--dry-run]
+
+  python -m ai_editor.cli build-sfx --report <path>
+                                     [--out <dir>] [--frames-dir <dir>]
+                                     [--limit N] [--max-sfx N]
+                                     [--skip-sfx] [--dry-run]
 """
 
 from __future__ import annotations
@@ -41,6 +52,10 @@ import logging
 import sys
 from pathlib import Path
 
+from ai_editor.audio_pipeline import (
+    DEFAULT_MAX_SFX,
+    build_audio_track,
+)
 from ai_editor.avatar_animator import build_avatar_track
 from ai_editor.avatar_creator import DEFAULT_REFERENCE_IMAGE
 from ai_editor.commentary_synthesizer import (
@@ -92,6 +107,27 @@ def _build_visualizations(args: argparse.Namespace) -> int:
     skipped = sum(1 for v in manifest["visualizations"] if v.get("skipped_reason"))
     if skipped:
         print(f"skipped:       {skipped} (see manifest skipped_reason fields)")
+    return 0
+
+
+def _build_sfx(args: argparse.Namespace) -> int:
+    manifest = build_audio_track(
+        report_path=Path(args.report),
+        out_dir=Path(args.out) if args.out else None,
+        frames_dir=Path(args.frames_dir) if args.frames_dir else None,
+        limit=args.limit,
+        max_sfx=args.max_sfx,
+        skip_sfx=args.skip_sfx,
+        dry_run=args.dry_run,
+    )
+    stats = manifest["stats"]
+    print(f"manifest:      {manifest['manifest_path']}")
+    print(f"scenes:        {stats['n_scenes']}")
+    print(f"atmospheres:   {stats['n_atmospheres']}")
+    print(f"hard fx:       {stats['n_hard_fx']}")
+    print(f"sfx calls:     {stats['sfx_calls']} (cached {stats['sfx_cached']})")
+    if stats["skipped"]:
+        print(f"skipped:       {stats['skipped']} (see manifest skipped_reason fields)")
     return 0
 
 
@@ -273,6 +309,65 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     ba.set_defaults(func=_build_avatar_track)
+
+    bsfx = sub.add_parser(
+        "build-sfx",
+        help=(
+            "Stage 4: walk analyzer scenes, run the Audio Director per "
+            "scene, render atmosphere + hard FX via Runway sound_effect, "
+            "emit manifest for the Hotel-v3 Resolve exporter."
+        ),
+    )
+    bsfx.add_argument(
+        "--report",
+        required=True,
+        help="Path to analyzer report JSON (must include scenes[]).",
+    )
+    bsfx.add_argument(
+        "--out",
+        default=None,
+        help=(
+            "Output directory. Defaults to output/sfx/<report_id>/ "
+            "derived from the report filename."
+        ),
+    )
+    bsfx.add_argument(
+        "--frames-dir",
+        default=None,
+        help=(
+            "Directory of pre-extracted reference frames for the multimodal "
+            "Audio Director. Defaults to the Canyons set under StudioOS-v1."
+        ),
+    )
+    bsfx.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Cap scenes processed (cheap testing).",
+    )
+    bsfx.add_argument(
+        "--max-sfx",
+        type=int,
+        default=DEFAULT_MAX_SFX,
+        help=(
+            f"Hard cap on SFX create calls per run (default: "
+            f"{DEFAULT_MAX_SFX}). Cached calls don't count."
+        ),
+    )
+    bsfx.add_argument(
+        "--skip-sfx",
+        action="store_true",
+        help="Run Audio Director only; do not call sound_effect.",
+    )
+    bsfx.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Stub Audio Director, no Anthropic, no Runway. Asset MP3 "
+            "files are zero-byte placeholders."
+        ),
+    )
+    bsfx.set_defaults(func=_build_sfx)
 
     args = parser.parse_args(argv)
     return args.func(args)
