@@ -16,6 +16,7 @@ build/
 *.mp4
 data/
 .cache/
+output/
 
 # IDE
 .vscode/
