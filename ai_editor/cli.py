@@ -43,6 +43,16 @@ Usage:
                                      [--out <dir>] [--frames-dir <dir>]
                                      [--limit N] [--max-sfx N]
                                      [--skip-sfx] [--dry-run]
+
+  python -m ai_editor.cli export-resolve --report <id>
+                                          --source <video>
+                                          [--bundle-root <dir>]
+                                          [--output-root <dir>]
+                                          [--commentary <path>]
+                                          [--visualizations <path>]
+                                          [--avatar <path>]
+                                          [--sfx <path>]
+                                          [--fps N] [--no-copy]
 """
 
 from __future__ import annotations
@@ -62,6 +72,12 @@ from ai_editor.commentary_synthesizer import (
     DEFAULT_TTS_MODEL,
     DEFAULT_VOICE_PRESET,
     build_commentary,
+)
+from ai_editor.resolve_exporter import (
+    DEFAULT_BUNDLE_ROOT,
+    DEFAULT_FPS,
+    DEFAULT_OUTPUT_ROOT,
+    bundle_for_resolve,
 )
 from ai_editor.visualization_pipeline import (
     DEFAULT_MAX_ALEPH,
@@ -128,6 +144,41 @@ def _build_sfx(args: argparse.Namespace) -> int:
     print(f"sfx calls:     {stats['sfx_calls']} (cached {stats['sfx_cached']})")
     if stats["skipped"]:
         print(f"skipped:       {stats['skipped']} (see manifest skipped_reason fields)")
+    return 0
+
+
+def _export_resolve(args: argparse.Namespace) -> int:
+    bundle_dir = bundle_for_resolve(
+        report_id=args.report,
+        source_video_path=Path(args.source),
+        bundle_root=Path(args.bundle_root),
+        output_root=Path(args.output_root),
+        commentary_segments=Path(args.commentary) if args.commentary else None,
+        visualizations_manifest=Path(args.visualizations) if args.visualizations else None,
+        avatar_manifest=Path(args.avatar) if args.avatar else None,
+        sfx_manifest=Path(args.sfx) if args.sfx else None,
+        fps=args.fps,
+        copy_media=not args.no_copy,
+    )
+    import json as _json
+    manifest = _json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
+    stats = manifest["stats"]
+    print(f"bundle:           {bundle_dir}")
+    print(f"manifest:         {bundle_dir / 'manifest.json'}")
+    print(f"lua importer:     {bundle_dir / manifest['lua_script']}")
+    print(f"visualizations:   {stats['n_visualizations']}")
+    print(f"avatar segments:  {stats['n_avatar_segments']}")
+    print(f"atmospheres (A3): {stats['n_atmospheres']}")
+    print(f"hard fx (A4):     {stats['n_hard_fx']}")
+    if stats["missing_manifests"]:
+        print(f"missing:          {', '.join(stats['missing_manifests'])}")
+    print()
+    print("Next: install + run the Resolve importer —")
+    print("  python R:/--CODE--/StudioOS-v1/scripts/install_resolve_scripts.py")
+    print(
+        "  Resolve > Workspace > Scripts > "
+        f"{Path(manifest['lua_script']).stem}"
+    )
     return 0
 
 
@@ -368,6 +419,84 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     bsfx.set_defaults(func=_build_sfx)
+
+    er = sub.add_parser(
+        "export-resolve",
+        help=(
+            "Stage 5: bundle commentary + visualizations + avatar + SFX "
+            "into a Resolve-importable directory with a unified manifest "
+            "and a Scripts-menu Lua importer."
+        ),
+    )
+    er.add_argument(
+        "--report",
+        required=True,
+        help=(
+            "Report id (matches the analyzer report stem, e.g. "
+            "'canyons_100_miles_1_3'). Drives manifest discovery + "
+            "bundle directory name."
+        ),
+    )
+    er.add_argument(
+        "--source",
+        required=True,
+        help="Path to the source documentary master cut (copied into the bundle).",
+    )
+    er.add_argument(
+        "--bundle-root",
+        default=str(DEFAULT_BUNDLE_ROOT),
+        help=(
+            "Where to materialize the bundle (a per-report subdir is "
+            f"created underneath). Default: {DEFAULT_BUNDLE_ROOT}."
+        ),
+    )
+    er.add_argument(
+        "--output-root",
+        default=str(DEFAULT_OUTPUT_ROOT),
+        help=(
+            "Where to look for upstream stage manifests if no explicit "
+            f"override is given. Default: {DEFAULT_OUTPUT_ROOT}."
+        ),
+    )
+    er.add_argument(
+        "--commentary",
+        default=None,
+        help="Override path to commentary_segments.json (Stage 1).",
+    )
+    er.add_argument(
+        "--visualizations",
+        default=None,
+        help="Override path to visualizations.json (Stage 2).",
+    )
+    er.add_argument(
+        "--avatar",
+        default=None,
+        help="Override path to avatar_segments/<id>/manifest.json (Stage 3).",
+    )
+    er.add_argument(
+        "--sfx",
+        default=None,
+        help="Override path to sfx/<id>/manifest.json (Stage 4).",
+    )
+    er.add_argument(
+        "--fps",
+        type=float,
+        default=DEFAULT_FPS,
+        help=(
+            "Fallback fps used by the Lua importer if the Resolve "
+            f"project setting can't be read. Default: {DEFAULT_FPS}."
+        ),
+    )
+    er.add_argument(
+        "--no-copy",
+        action="store_true",
+        help=(
+            "Skip copying media into the bundle (faster + smaller for "
+            "tests). The bundle will still contain manifest + Lua but "
+            "asset files will be empty placeholders."
+        ),
+    )
+    er.set_defaults(func=_export_resolve)
 
     args = parser.parse_args(argv)
     return args.func(args)
