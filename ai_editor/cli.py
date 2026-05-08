@@ -9,6 +9,12 @@ on each suggestion, extract source segments via ffmpeg, run Runway Aleph
 (gen4_aleph video-to-video) to apply the VFX layer to existing footage,
 and emit a manifest JSON for the player UI.
 
+Stage 3 (Sunday): build-avatar-track — for each commentary segment,
+animate the AI Jonny avatar (custom Runway avatar created once via
+``avatars.create``) by passing the segment's TTS audio to
+``avatar_videos.create``. Output: per-segment talking-head MP4s plus
+a manifest JSON consumed by the AvatarOverlay player component.
+
 Usage:
   python -m ai_editor.cli build-commentary --report <path> [--out <dir>]
                                             [--limit N] [--dry-run]
@@ -20,6 +26,12 @@ Usage:
                                                 [--out <dir>] [--limit N]
                                                 [--max-aleph N]
                                                 [--skip-aleph] [--dry-run]
+
+  python -m ai_editor.cli build-avatar-track --segments <path>
+                                              [--out <dir>] [--limit N]
+                                              [--max-segments N]
+                                              [--reference-image <path>]
+                                              [--dry-run]
 """
 
 from __future__ import annotations
@@ -29,6 +41,8 @@ import logging
 import sys
 from pathlib import Path
 
+from ai_editor.avatar_animator import build_avatar_track
+from ai_editor.avatar_creator import DEFAULT_REFERENCE_IMAGE
 from ai_editor.commentary_synthesizer import (
     DEFAULT_TTS_MODEL,
     DEFAULT_VOICE_PRESET,
@@ -78,6 +92,34 @@ def _build_visualizations(args: argparse.Namespace) -> int:
     skipped = sum(1 for v in manifest["visualizations"] if v.get("skipped_reason"))
     if skipped:
         print(f"skipped:       {skipped} (see manifest skipped_reason fields)")
+    return 0
+
+
+def _build_avatar_track(args: argparse.Namespace) -> int:
+    manifest = build_avatar_track(
+        segments_json_path=Path(args.segments),
+        out_dir=Path(args.out) if args.out else None,
+        reference_image=(
+            Path(args.reference_image) if args.reference_image
+            else DEFAULT_REFERENCE_IMAGE
+        ),
+        limit=args.limit,
+        max_segments=args.max_segments,
+        dry_run=args.dry_run,
+    )
+    stats = manifest["stats"]
+    print(f"manifest:     {manifest['manifest_path']}")
+    print(f"character:    {manifest.get('character_id') or '<dry-run>'}")
+    print(f"animated:     {stats['n_animated']}/{stats['n_total']}")
+    print(
+        f"runway calls: {stats['runway_calls']} "
+        f"(cached {stats['cached_calls']})"
+    )
+    if stats["skipped"]:
+        print(
+            f"skipped:      {stats['skipped']} "
+            "(see manifest skipped_reason fields)"
+        )
     return 0
 
 
@@ -175,6 +217,62 @@ def main(argv: list[str] | None = None) -> int:
         help="Stub classifier+director, no Anthropic, no Runway, no ffmpeg.",
     )
     bv.set_defaults(func=_build_visualizations)
+
+    ba = sub.add_parser(
+        "build-avatar-track",
+        help=(
+            "Stage 3: animate the AI Jonny avatar against each commentary "
+            "segment's TTS audio via Runway avatar_videos; emit per-segment "
+            "MP4s + manifest for the AvatarOverlay player component."
+        ),
+    )
+    ba.add_argument(
+        "--segments",
+        required=True,
+        help="Path to commentary_segments.json (Stage 1 output).",
+    )
+    ba.add_argument(
+        "--out",
+        default=None,
+        help=(
+            "Output directory. Defaults to "
+            "output/avatar_segments/<report_id>/ derived from the "
+            "segments JSON's report_path."
+        ),
+    )
+    ba.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Cap segments processed (cheap testing).",
+    )
+    ba.add_argument(
+        "--max-segments",
+        type=int,
+        default=None,
+        help=(
+            "Hard cap on Runway calls per run. Cached calls don't count. "
+            "Useful when the segments JSON has many entries but you only "
+            "want to burn credits on a subset."
+        ),
+    )
+    ba.add_argument(
+        "--reference-image",
+        default=None,
+        help=(
+            "Override the reference photo for avatar creation. Defaults "
+            "to data/avatars/jonny_reference_frames/jonny_main.jpg."
+        ),
+    )
+    ba.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Skip Runway entirely. Manifest is still written; per-segment "
+            "MP4 files are zero-byte placeholders."
+        ),
+    )
+    ba.set_defaults(func=_build_avatar_track)
 
     args = parser.parse_args(argv)
     return args.func(args)
