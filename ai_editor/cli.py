@@ -3,13 +3,23 @@
 Stage 1 (Friday): build-commentary — synthesize a time-aligned audio
 commentary track from a Film Analyzer report.
 
-Stage 2 (Saturday) will add: classify-suggestions, build-visualizations,
-build-avatar.
+Stage 2 (Saturday): build-visualizations — classify each commentary
+segment as observation vs suggestion, run the multimodal Visual Director
+on each suggestion, extract source segments via ffmpeg, run Runway Aleph
+(gen4_aleph video-to-video) to apply the VFX layer to existing footage,
+and emit a manifest JSON for the player UI.
 
 Usage:
   python -m ai_editor.cli build-commentary --report <path> [--out <dir>]
                                             [--limit N] [--dry-run]
                                             [--voice Vincent] [--model ID]
+
+  python -m ai_editor.cli build-visualizations --segments <path>
+                                                [--source-video <mov>]
+                                                [--frames-dir <dir>]
+                                                [--out <dir>] [--limit N]
+                                                [--max-aleph N]
+                                                [--skip-aleph] [--dry-run]
 """
 
 from __future__ import annotations
@@ -23,6 +33,10 @@ from ai_editor.commentary_synthesizer import (
     DEFAULT_TTS_MODEL,
     DEFAULT_VOICE_PRESET,
     build_commentary,
+)
+from ai_editor.visualization_pipeline import (
+    DEFAULT_MAX_ALEPH,
+    build_visualizations,
 )
 
 
@@ -42,6 +56,28 @@ def _build_commentary(args: argparse.Namespace) -> int:
     cached = sum(1 for s in result.segments if s.cached)
     if cached:
         print(f"cached:   {cached}/{len(result.segments)} (no credits burned)")
+    return 0
+
+
+def _build_visualizations(args: argparse.Namespace) -> int:
+    manifest = build_visualizations(
+        segments_json_path=Path(args.segments),
+        source_video=Path(args.source_video) if args.source_video else None,
+        out_dir=Path(args.out),
+        frames_dir=Path(args.frames_dir) if args.frames_dir else None,
+        max_aleph=args.max_aleph,
+        dry_run=args.dry_run,
+        skip_aleph=args.skip_aleph,
+        limit=args.limit,
+    )
+    stats = manifest["stats"]
+    print(f"manifest:      {manifest['manifest_path']}")
+    print(f"suggestions:   {stats['n_suggestions']}")
+    print(f"observations:  {stats['n_observations']}")
+    print(f"aleph calls:   {stats['aleph_calls']} (cached {stats['aleph_cached']})")
+    skipped = sum(1 for v in manifest["visualizations"] if v.get("skipped_reason"))
+    if skipped:
+        print(f"skipped:       {skipped} (see manifest skipped_reason fields)")
     return 0
 
 
@@ -81,6 +117,64 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip TTS calls; produce empty track + segments JSON for plumbing tests.",
     )
     bc.set_defaults(func=_build_commentary)
+
+    bv = sub.add_parser(
+        "build-visualizations",
+        help=(
+            "Stage 2: classify commentary segments, brief Aleph for each "
+            "suggestion, run gen4_aleph video-to-video, write manifest."
+        ),
+    )
+    bv.add_argument(
+        "--segments",
+        required=True,
+        help="Path to commentary_segments.json (Stage 1 output).",
+    )
+    bv.add_argument(
+        "--source-video",
+        default=None,
+        help=(
+            "Source documentary cut to extract segments from. If omitted, "
+            "Aleph calls are skipped (manifest still records briefs)."
+        ),
+    )
+    bv.add_argument(
+        "--frames-dir",
+        default=None,
+        help=(
+            "Directory of pre-extracted reference frames "
+            "(e.g. analysis_review/frames_<id>/). Defaults to the Canyons "
+            "set under StudioOS-v1."
+        ),
+    )
+    bv.add_argument(
+        "--out",
+        default="output/visualizations",
+        help="Output directory for source segments + transformed clips + manifest.",
+    )
+    bv.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Cap segments processed (cheap testing).",
+    )
+    bv.add_argument(
+        "--max-aleph",
+        type=int,
+        default=DEFAULT_MAX_ALEPH,
+        help=f"Hard cap on Aleph calls per run (default: {DEFAULT_MAX_ALEPH}).",
+    )
+    bv.add_argument(
+        "--skip-aleph",
+        action="store_true",
+        help="Run classifier + director + ffmpeg only; do not call Aleph.",
+    )
+    bv.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Stub classifier+director, no Anthropic, no Runway, no ffmpeg.",
+    )
+    bv.set_defaults(func=_build_visualizations)
 
     args = parser.parse_args(argv)
     return args.func(args)
