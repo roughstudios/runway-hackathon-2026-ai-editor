@@ -6,17 +6,35 @@ _Window: 2026-05-08 (overnight) → 2026-05-09 morning, within the May 8
 
 ## Status — at a glance
 
-**Stage 6 architecture shipped.** The hero composer (`compose_hero` +
-`python -m ai_editor.cli compose-hero`) curates 5 high-impact moments
-from the analyzer report, runs the full AI-editor pipeline against
-them via direct httpx (the Runway Python SDK is broken on this
-machine — see "SDK note" below), and emits a single hero MP4 + manifest
-that the LIVE PAGE consumes.
+**Stage 6 shipped end-to-end. Live Runway pipeline ran successfully.**
+`python -m ai_editor.cli compose-hero` curated 5 high-impact moments
+from the Canyons 1.3 analyzer report, ran the full AI-editor pipeline
+against them via direct httpx (the Runway Python SDK is broken on
+this machine — see "SDK note" below), and emitted a single hero MP4 +
+manifest that the LIVE PAGE consumes.
 
-The web side ships a `HeroPlayer.tsx` + `/api/hero/[reportId]` route.
+**Final numbers (Canyons 100 Miles 1.3):**
+
+- `hero.mp4`: 18.6 MB, 1280×720 30 fps h264 + AAC, **5.42 min** (325 s)
+- 5 curated segments — open_hook, first_place, arwa_battle,
+  tommy_climax, arwa_resolution — all produced full assets:
+  - 5/5 ElevenLabs Jonny-voice TTS (10–17 s each)
+  - 5/5 Runway avatar_videos (gwm1 talking-heads, full lip-sync)
+  - 3/3 Runway gen4_aleph treatments (atmospheric / volumetric_light /
+    color_grade, brand-aware briefs)
+  - 2/2 Runway sound_effect (mountain ambience bed + finish line cheer)
+- **Real credit burn: 287 credits** (49,907 → 49,620), well under the
+  4,500 cap I set for this run, and ~14× under the heuristic estimate
+  the manifest reports (the per-endpoint cost table is conservative).
+- Three preview frames at 5 s, 80 s, 105 s confirm the composition is
+  clean: avatar PIP top-left, source slideshow under, Aleph god-rays
+  hitting at the right timecodes. Saved at
+  `output/hero/canyons_100_miles_1_3/preview_*.jpg`.
+
+The web side ships `HeroPlayer.tsx` + `/api/hero/[reportId]` route.
 Mirror them into `R:\--CODE--\StudioOS-v1\web\learndocumentary` and
-`git push` triggers the Vercel autodeploy (no `vercel` CLI — that's the
-sacred deploy contract from the StudioOS CLAUDE.md).
+`git push` triggers the Vercel autodeploy (no `vercel` CLI — that's
+the sacred deploy contract from the StudioOS CLAUDE.md).
 
 **Verify in 60 seconds (morning Jonny):**
 
@@ -346,10 +364,13 @@ slideshow when missing.
   `decrease + pad` to stay compatible.
 - Live ElevenLabs synthesis green (each curated segment produces
   ~10–15 s mp3 via the cloned-Jonny voice).
-- Live Runway pipeline run was started overnight; check
-  `output/hero/canyons_100_miles_1_3/manifest.json` and the asset
-  directories for what actually completed (the Aleph + SFX phases run
-  long-poll and may straddle the hand-off boundary).
+- Live Runway pipeline ran end-to-end and completed cleanly: 5/5
+  avatars, 3/3 Aleph treatments, 2/2 SFX. ffmpeg compose ran the
+  full filter_complex pass and emitted a 5.42-min hero. See the
+  Status block at the top of this file for numbers, plus
+  `output/hero/canyons_100_miles_1_3/preview_5s.jpg`,
+  `preview_80s.jpg`, `preview_105s.jpg` for visual confirmation
+  (avatar PIP + Aleph god-rays both render correctly).
 - The HeroPlayer component is React 18 + Next.js App Router compatible
   (no client/server boundary issues; all state lives in `useState` +
   `useEffect`). Smoke-tested by rendering against a static
