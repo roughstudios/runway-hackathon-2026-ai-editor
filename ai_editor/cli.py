@@ -73,6 +73,11 @@ from ai_editor.commentary_synthesizer import (
     DEFAULT_VOICE_PRESET,
     build_commentary,
 )
+from ai_editor.hero_composer import (
+    DEFAULT_FRAMES_DIR as HERO_DEFAULT_FRAMES_DIR,
+    DEFAULT_OUT_ROOT as HERO_DEFAULT_OUT_ROOT,
+    compose_hero,
+)
 from ai_editor.resolve_exporter import (
     DEFAULT_BUNDLE_ROOT,
     DEFAULT_FPS,
@@ -179,6 +184,34 @@ def _export_resolve(args: argparse.Namespace) -> int:
         "  Resolve > Workspace > Scripts > "
         f"{Path(manifest['lua_script']).stem}"
     )
+    return 0
+
+
+def _compose_hero(args: argparse.Namespace) -> int:
+    only = None
+    if args.only_segments:
+        only = [s.strip() for s in args.only_segments.split(",") if s.strip()]
+    manifest = compose_hero(
+        report_path=Path(args.report),
+        out_root=Path(args.out_root) if args.out_root else HERO_DEFAULT_OUT_ROOT,
+        frames_dir=Path(args.frames_dir) if args.frames_dir else HERO_DEFAULT_FRAMES_DIR,
+        max_credits=args.max_credits,
+        dry_run=args.dry_run,
+        skip_runway=args.skip_runway,
+        skip_aleph=args.skip_aleph,
+        skip_avatar=args.skip_avatar,
+        skip_sfx=args.skip_sfx,
+        only_segments=only,
+    )
+    print(f"hero:        {manifest['hero_path']}")
+    print(f"manifest:    {manifest['manifest_path']}")
+    print(f"duration:    {manifest['duration_sec']:.1f}s ({manifest['duration_minutes']} min)")
+    print(f"segments:    {len(manifest['segments'])}")
+    print(f"credits:     {manifest['spent_estimated_credits']} (est) / {manifest['max_credits']}")
+    print(f"breakdown:   {manifest['spent_breakdown']}")
+    skipped_total = sum(len(s.get('skipped') or []) for s in manifest['segments'])
+    if skipped_total:
+        print(f"skipped:     {skipped_total} sub-tasks (see manifest)")
     return 0
 
 
@@ -497,6 +530,59 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     er.set_defaults(func=_export_resolve)
+
+    ch = sub.add_parser(
+        "compose-hero",
+        help=(
+            "Stage 6 (overnight India-v3): curate 5-7 min of the analyzer "
+            "report, run TTS + avatar_videos + Aleph + sound_effect via "
+            "direct httpx (the runwayml SDK hangs on this machine), and "
+            "compose a single hero MP4 + manifest for the LIVE PAGE."
+        ),
+    )
+    ch.add_argument(
+        "--report",
+        required=True,
+        help="Path to analyzer report JSON (e.g. canyons_100_miles_1_3.json).",
+    )
+    ch.add_argument(
+        "--out-root",
+        default=None,
+        help="Output root (per-report subdir is created underneath). "
+             f"Default: {HERO_DEFAULT_OUT_ROOT}.",
+    )
+    ch.add_argument(
+        "--frames-dir",
+        default=None,
+        help="Reference frames directory used to build the slideshow source. "
+             f"Default: {HERO_DEFAULT_FRAMES_DIR}.",
+    )
+    ch.add_argument(
+        "--max-credits",
+        type=int,
+        default=5000,
+        help="Hard cap on estimated Runway credit burn (default: 5000).",
+    )
+    ch.add_argument(
+        "--only-segments",
+        default=None,
+        help="Comma-separated list of segment ids to process "
+             "(e.g. 'open_hook,first_place'). Skip the rest.",
+    )
+    ch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="No Runway, no ElevenLabs. Manifest only; assets are placeholders.",
+    )
+    ch.add_argument(
+        "--skip-runway",
+        action="store_true",
+        help="ElevenLabs runs but every Runway endpoint is skipped.",
+    )
+    ch.add_argument("--skip-aleph", action="store_true", help="Skip Aleph only.")
+    ch.add_argument("--skip-avatar", action="store_true", help="Skip avatar_videos only.")
+    ch.add_argument("--skip-sfx", action="store_true", help="Skip sound_effect only.")
+    ch.set_defaults(func=_compose_hero)
 
     args = parser.parse_args(argv)
     return args.func(args)
